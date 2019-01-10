@@ -31,10 +31,34 @@
     warnings
 )]
 
-use ring::{agreement, error, rand, test};
+use ring::{agreement::*, error, rand, test};
 
 #[test]
-fn agreement_agree_ephemeral() {
+fn agreement_agree() {
+    agreement_agree_(
+        |private_key: PrivateKey<Ephemeral>, peer_alg, peer_public_key| {
+            (None, private_key.agree(peer_alg, peer_public_key))
+        },
+    );
+    agreement_agree_(|private_key, peer_alg, peer_public_key| {
+        (
+            Some(private_key.agree_static(peer_alg, peer_public_key)),
+            private_key.agree(peer_alg, peer_public_key),
+        )
+    });
+}
+
+fn agreement_agree_<U: Lifetime, F>(agree: F)
+where
+    F: Fn(
+        PrivateKey<U>,
+        &Algorithm,
+        untrusted::Input,
+    ) -> (
+        Option<Result<InputKeyMaterial, error::Unspecified>>,
+        Result<InputKeyMaterial, error::Unspecified>,
+    ),
+{
     let rng = rand::SystemRandom::new();
 
     test::from_file("tests/agreement_tests.txt", |section, test_case| {
@@ -49,7 +73,7 @@ fn agreement_agree_ephemeral() {
             None => {
                 let my_private = test_case.consume_bytes("D");
                 let rng = test::rand::FixedSliceRandom { bytes: &my_private };
-                let my_private = agreement::EphemeralPrivateKey::generate(alg, &rng)?;
+                let my_private = PrivateKey::<U>::generate(alg, &rng)?;
 
                 let my_public = test_case.consume_bytes("MyQ");
                 let output = test_case.consume_bytes("Output");
@@ -71,23 +95,12 @@ fn agreement_agree_ephemeral() {
             },
 
             Some(_) => {
-                // In the no-heap mode, some algorithms aren't supported so
-                // we have to skip those algorithms' test cases.
-                let dummy_private_key = agreement::EphemeralPrivateKey::generate(alg, &rng)?;
-                fn kdf_not_called(_: &[u8]) -> Result<(), ()> {
-                    panic!(
-                        "The KDF was called during ECDH when the peer's \
-                         public key is invalid."
-                    );
-                }
-                assert!(agreement::agree_ephemeral(
-                    dummy_private_key,
-                    alg,
-                    peer_public,
-                    (),
-                    kdf_not_called
-                )
-                .is_err());
+                let dummy_private_key = PrivateKey::<U>::generate(alg, &rng)?;
+                let (static_ikm, ephemeral_ikm) = agree(dummy_private_key, alg, peer_public);
+                if let Some(ikm) = static_ikm {
+                    assert!(ikm.is_err());
+                };
+                assert!(ephemeral_ikm.is_err());
             },
         }
 
@@ -150,15 +163,10 @@ fn x25519(private_key: &[u8], public_key: &[u8]) -> Vec<u8> {
 
 fn x25519_(private_key: &[u8], public_key: &[u8]) -> Result<Vec<u8>, error::Unspecified> {
     let rng = test::rand::FixedSliceRandom { bytes: private_key };
-    let private_key = agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
+    let private_key = PrivateKey::<Ephemeral>::generate(&X25519, &rng)?;
     let public_key = untrusted::Input::from(public_key);
-    agreement::agree_ephemeral(
-        private_key,
-        &agreement::X25519,
-        public_key,
-        error::Unspecified,
-        |agreed_value| Ok(Vec::from(agreed_value)),
-    )
+    let ikm = private_key.agree(&X25519, public_key)?;
+    ikm.derive(|agreed_value| Ok(Vec::from(agreed_value)))
 }
 
 fn h(s: &str) -> Vec<u8> {
@@ -170,13 +178,13 @@ fn h(s: &str) -> Vec<u8> {
     }
 }
 
-fn alg_from_curve_name(curve_name: &str) -> &'static agreement::Algorithm {
+fn alg_from_curve_name(curve_name: &str) -> &'static Algorithm {
     if curve_name == "P-256" {
-        &agreement::ECDH_P256
+        &ECDH_P256
     } else if curve_name == "P-384" {
-        &agreement::ECDH_P384
+        &ECDH_P384
     } else if curve_name == "X25519" {
-        &agreement::X25519
+        &X25519
     } else {
         panic!("Unsupported curve: {}", curve_name);
     }

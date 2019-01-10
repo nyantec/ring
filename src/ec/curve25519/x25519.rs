@@ -103,3 +103,5 @@ extern "C" {
         out: &mut ops::EncodedPoint, scalar: &ops::Scalar, point: &ops::EncodedPoint,
     );
 }
+
+impl_array_split!(u8, PUBLIC_KEY_LEN, ec::PUBLIC_KEY_MAX_LEN - PUBLIC_KEY_LEN);

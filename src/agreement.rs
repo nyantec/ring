@@ -27,7 +27,8 @@
 //!
 //! let rng = rand::SystemRandom::new();
 //!
-//! let my_private_key = agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
+//! let my_private_key =
+//!     agreement::PrivateKey::<agreement::Ephemeral>::generate(&agreement::X25519, &rng)?;
 //!
 //! // Make `my_public_key` a byte slice containing my public key. In a real
 //! // application, this would be sent to the peer in an encoded protocol
@@ -47,18 +48,13 @@
 //! // is X25519 since we just generated it.
 //! let peer_public_key_alg = &agreement::X25519;
 //!
-//! agreement::agree_ephemeral(
-//!     my_private_key,
-//!     peer_public_key_alg,
-//!     peer_public_key,
-//!     ring::error::Unspecified,
-//!     |_key_material| {
-//!         // In a real application, we'd apply a KDF to the key material and the
-//!         // public keys (as recommended in RFC 7748) and then derive session
-//!         // keys from the result. We omit all that here.
-//!         Ok(())
-//!     },
-//! )
+//! let input_keying_material = my_private_key.agree(peer_public_key_alg, peer_public_key)?;
+//! input_keying_material.derive(|_key_material| {
+//!     // In a real application, we'd apply a KDF to the key material and the
+//!     // public keys (as recommended in RFC 7748) and then derive session
+//!     // keys from the result. We omit all that here.
+//!     Ok(())
+//! })
 //! # }
 //! # fn main() { x25519_agreement_example().unwrap() }
 //! ```
@@ -73,6 +69,7 @@ pub use crate::ec::{
     curve25519::x25519::X25519,
     suite_b::ecdh::{ECDH_P256, ECDH_P384},
 };
+use core::marker::PhantomData;
 
 /// A key agreement algorithm.
 pub struct Algorithm {
@@ -97,6 +94,7 @@ impl PartialEq for Algorithm {
 pub struct EphemeralPrivateKey {
     private_key: ec::Seed,
     alg: &'static Algorithm,
+    usage: PhantomData<U>,
 }
 
 impl<'a> EphemeralPrivateKey {
@@ -174,8 +172,6 @@ where
         return Err(error_value);
     }
 
-    let alg = &my_private_key.alg;
-
     // NSA Guide Prerequisite 2, regarding which KDFs are allowed, is delegated
     // to the caller.
 
@@ -193,12 +189,42 @@ where
     //
     // We have a pretty liberal interpretation of the NIST's spec's "Destroy"
     // that doesn't meet the NSA requirement to "zeroize."
-    (alg.ecdh)(shared_key, &my_private_key.private_key, peer_public_key)
-        .map_err(|_| error_value)?;
+    let mut ikm = InputKeyMaterial {
+        bytes: [0; ec::ELEM_MAX_BYTES],
+        len: alg.curve.elem_and_scalar_len,
+    };
+    (alg.ecdh)(&mut ikm.bytes[..ikm.len], my_private_key, peer_public_key)?;
 
-    // NSA Guide Steps 5 and 6.
-    //
-    // Again, we have a pretty liberal interpretation of the NIST's spec's
-    // "Destroy" that doesn't meet the NSA requirement to "zeroize."
-    kdf(shared_key)
+    // NSA Guide Steps 5 and 6 are deferred to `InputKeyMaterial::derive`.
+    Ok(ikm)
+}
+
+/// The result of a key agreement operation, to be fed into a KDF.
+///
+/// Intentionally not `Clone` or `Copy` since the value should only be
+/// used once.
+#[must_use]
+pub struct InputKeyMaterial {
+    bytes: [u8; ec::ELEM_MAX_BYTES],
+    len: usize,
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+impl InputKeyMaterial {
+    /// Calls `kdf` with the raw key material and then returns what `kdf`
+    /// returns, consuming `Self` so that the key material can only be used
+    /// once.
+    pub fn derive<F, R>(self, kdf: F) -> R
+    where
+        F: FnOnce(&[u8]) -> R,
+    {
+        kdf(&self.bytes[..self.len])
+
+        // NSA Guide Steps 5 and 6.
+        // Again, we have a pretty liberal interpretation of the NIST's spec's
+        // "Destroy" that doesn't meet the NSA requirement to "zeroize."
+    }
 }

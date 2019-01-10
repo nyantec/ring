@@ -162,6 +162,11 @@ mod tests {
 
     #[test]
     fn test_agreement_suite_b_ecdh_generate() {
+        test_agreement_suite_b_ecdh_generate_::<agreement::Ephemeral>();
+        test_agreement_suite_b_ecdh_generate_::<agreement::Static>();
+    }
+
+    fn test_agreement_suite_b_ecdh_generate_<L: agreement::Lifetime>() {
         // Generates a string of bytes 0x00...00, which will always result in
         // a scalar value of zero.
         let random_00 = test::rand::FixedByteRandom { byte: 0x00 };
@@ -173,12 +178,12 @@ mod tests {
         for &(_, alg, curve, ops) in SUPPORTED_SUITE_B_ALGS.iter() {
             // Test that the private key value zero is rejected and that
             // `generate` gives up after a while of only getting zeros.
-            assert!(agreement::EphemeralPrivateKey::generate(alg, &random_00).is_err());
+            assert!(agreement::KeyPair::<L>::generate(alg, &random_00).is_err());
 
             // Test that the private key value larger than the group order is
             // rejected and that `generate` gives up after a while of only
             // getting values larger than the group order.
-            assert!(agreement::EphemeralPrivateKey::generate(alg, &random_ff).is_err());
+            assert!(agreement::KeyPair::<L>::generate(alg, &random_ff).is_err());
 
             // Test that a private key value exactly equal to the group order
             // is rejected and that `generate` gives up after a while of only
@@ -189,7 +194,7 @@ mod tests {
             {
                 let n_bytes = &mut n_bytes[..num_bytes];
                 let rng = test::rand::FixedSliceRandom { bytes: n_bytes };
-                assert!(agreement::EphemeralPrivateKey::generate(alg, &rng).is_err());
+                assert!(agreement::KeyPair::<L>::generate(alg, &rng).is_err());
             }
 
             // Test that a private key value exactly equal to the group order
@@ -213,7 +218,7 @@ mod tests {
                 let rng = test::rand::FixedSliceRandom {
                     bytes: n_plus_1_bytes,
                 };
-                assert!(agreement::EphemeralPrivateKey::generate(alg, &rng).is_err());
+                assert!(agreement::KeyPair::<L>::generate(alg, &rng).is_err());
             }
 
             // Test recovery from initial RNG failure. The first value will be

@@ -199,7 +199,7 @@ impl<U: Lifetime> PrivateKey<U> {
         //
         // Obviously, this only handles the part of Step 1 between the private
         // key generation and the sending of the public key to the peer. `out`
-        // is what should be sent to the peer.
+        // is what shouPrivateKeyld be sent to the peer.
         let mut public_key = PublicKey {
             bytes: [0; PUBLIC_KEY_MAX_LEN],
             alg: self.alg,
@@ -262,6 +262,23 @@ impl PrivateKey<Static> {
             peer_public_key_alg,
             peer_public_key,
         )
+    }
+
+    pub fn from_bytes(
+        alg: &'static Algorithm, bytes: untrusted::Input
+    ) -> Result<Self, error::Unspecified> {
+        let private_key = ec::PrivateKey::from_bytes(&alg.curve, bytes)?;
+        Ok(Self {
+            private_key,
+            alg,
+            usage: PhantomData,
+        })
+    }
+
+    pub fn bytes(
+        &self, alg: &'static Algorithm
+    ) -> &[u8] {
+        self.private_key.bytes(&alg.curve)
     }
 }
 

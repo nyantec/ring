@@ -23,7 +23,6 @@ use crate::{
     error::{self, KeyRejected},
     pkcs8, rand,
 };
-use std;
 use untrusted;
 
 /// An RSA key pair, used for signing.
